@@ -325,6 +325,60 @@ def fetch_top_advertisers():
     return rows
 
 
+# ─── Fetch 4: Top 15 Apps by Absolute Download Change (last 7 days) ─────────
+def fetch_top_download_delta():
+    """Fetch top 15 apps by absolute download change (delta) in the last 7 days."""
+    print("\n=== Fetching Top 15 Apps by Absolute Download Change (7-day) ===")
+
+    latest_date = get_latest_available_date()
+    date_str = latest_date.strftime("%Y-%m-%d")
+    period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
+    print(f"  Period: {period_start} to {date_str} (7 days)")
+
+    data = st_get("/v1/unified/sales_report_estimates_comparison_attributes", {
+        "comparison_attribute": "delta",
+        "time_range": "week",
+        "measure": "units",
+        "category": "0",
+        "date": date_str,
+        "device_type": "total",
+        "limit": 15,
+        "regions": "WW",
+    })
+
+    if not data:
+        print("  ERROR: No data returned")
+        return []
+
+    print(f"  Got {len(data)} apps")
+
+    now = datetime.utcnow()
+    rows = []
+    for rank, item in enumerate(data[:15], 1):
+        unified_id = item.get("app_id", "")
+
+        app_info = lookup_app(unified_id)
+        agg = aggregate_entities(item)
+
+        row = {
+            "fetch_date": now.strftime("%Y-%m-%d"),
+            "period_start": period_start,
+            "rank": rank,
+            "app_id": str(unified_id),
+            "app_name": app_info["name"],
+            "publisher": app_info["publisher"],
+            "icon_url": app_info["icon_url"],
+            "downloads": agg["downloads"],
+            "previous_downloads": agg["prev_downloads"],
+            "download_delta": agg["delta"],
+            "download_pct_change": round(agg["pct_change"] * 100, 2),
+        }
+        rows.append(row)
+        print(f"  #{rank}: {app_info['name']} — delta: {agg['delta']:+,} ({agg['downloads']:,} downloads)")
+
+    return rows
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 def main():
     print("=" * 60)
@@ -343,7 +397,7 @@ def main():
         print("ERROR: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set")
         sys.exit(1)
 
-    for table in ["download_rank_30d", "download_percent_rank_30d", "advertiser_rank_30d"]:
+    for table in ["download_rank_30d", "download_percent_rank_30d", "advertiser_rank_30d", "download_delta_rank_7d"]:
         if not ensure_table(table, {}):
             print(f"WARNING: Table '{table}' may not exist. Will attempt inserts anyway.")
 
@@ -362,11 +416,17 @@ def main():
     if advertiser_rows:
         upsert_rows("advertiser_rank_30d", advertiser_rows)
 
+    # 4. Top download absolute change (7-day)
+    delta_rows = fetch_top_download_delta()
+    if delta_rows:
+        upsert_rows("download_delta_rank_7d", delta_rows)
+
     print("\n" + "=" * 60)
     print("SUMMARY")
     print(f"  Downloads ranking (7-day): {len(download_rows)} rows")
     print(f"  Download growth ranking (7-day): {len(growth_rows)} rows")
     print(f"  Advertiser ranking (7-day): {len(advertiser_rows)} rows")
+    print(f"  Download delta ranking (7-day): {len(delta_rows)} rows")
     print("=" * 60)
 
 
