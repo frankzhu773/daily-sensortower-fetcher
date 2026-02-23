@@ -62,24 +62,70 @@ def st_get(path, params):
 
 
 def lookup_app(app_id):
-    """Look up app name and icon from Sensor Tower unified endpoint."""
+    """Look up app name, icon, publisher, and description from Sensor Tower."""
     time.sleep(0.3)  # Rate limit: 6 req/s
+
+    # Step 1: Get basic info from unified endpoint
     data = st_get(f"/v1/unified/apps/{app_id}", {})
-    if data and isinstance(data, dict):
-        name = data.get("name", "")
-        if not name:
-            # Fallback: try to get name from sub_apps
-            sub_apps = data.get("sub_apps", [])
-            if sub_apps:
-                name = sub_apps[0].get("name", "Unknown")
-            else:
-                name = "Unknown"
-        return {
-            "name": name,
-            "icon_url": data.get("icon_url", ""),
-            "publisher": data.get("unified_publisher_name", data.get("publisher_name", "Unknown")),
-        }
-    return {"name": "Unknown", "icon_url": "", "publisher": "Unknown"}
+    if not data or not isinstance(data, dict):
+        return {"name": "Unknown", "icon_url": "", "publisher": "Unknown", "description": ""}
+
+    name = data.get("name", "")
+    if not name:
+        sub_apps = data.get("sub_apps", [])
+        if sub_apps:
+            name = sub_apps[0].get("name", "Unknown")
+        else:
+            name = "Unknown"
+
+    result = {
+        "name": name,
+        "icon_url": data.get("icon_url", ""),
+        "publisher": data.get("unified_publisher_name", data.get("publisher_name", "Unknown")),
+        "description": "",
+    }
+
+    # Step 2: Get description from platform-specific endpoint
+    # Prefer iOS sub_app for richer descriptions, fall back to Android
+    sub_apps = data.get("sub_apps", [])
+    if sub_apps:
+        # Try iOS first, then Android
+        ios_sub = next((sa for sa in sub_apps if sa.get("os") == "ios"), None)
+        android_sub = next((sa for sa in sub_apps if sa.get("os") == "android"), None)
+        target_sub = ios_sub or android_sub
+
+        if target_sub:
+            platform = target_sub.get("os", "ios")
+            sub_id = target_sub.get("id", "")
+            if sub_id:
+                time.sleep(0.3)  # Rate limit
+                platform_data = st_get(f"/v1/{platform}/apps/{sub_id}", {})
+                if platform_data and isinstance(platform_data, dict):
+                    desc_obj = platform_data.get("description", {})
+                    if isinstance(desc_obj, dict):
+                        # Priority: subtitle > app_summary > full_description (truncated)
+                        subtitle = (desc_obj.get("subtitle") or "").strip()
+                        app_summary = (desc_obj.get("app_summary") or "").strip()
+                        full_desc = (desc_obj.get("full_description") or "").strip()
+
+                        if subtitle:
+                            result["description"] = subtitle
+                        elif app_summary:
+                            # app_summary can be long; take first sentence or truncate
+                            result["description"] = app_summary[:500]
+                        elif full_desc:
+                            # Strip HTML tags and truncate
+                            import re
+                            clean = re.sub(r'<[^>]+>', ' ', full_desc)
+                            clean = re.sub(r'\s+', ' ', clean).strip()
+                            result["description"] = clean[:500]
+                    elif isinstance(desc_obj, str):
+                        result["description"] = desc_obj[:500]
+
+    if result["description"]:
+        print(f"    Description: {result['description'][:80]}...")
+
+    return result
 
 
 def aggregate_entities(item):
@@ -218,6 +264,7 @@ def fetch_top_downloads():
             "previous_downloads": agg["prev_downloads"],
             "download_delta": agg["delta"],
             "download_pct_change": round(agg["pct_change"] * 100, 2),
+            "app_description": app_info["description"],
         }
         rows.append(row)
         print(f"  #{rank}: {app_info['name']} — {agg['downloads']:,} downloads (prev: {agg['prev_downloads']:,}, delta: {agg['delta']:,})")
@@ -272,6 +319,7 @@ def fetch_top_download_growth():
             "previous_downloads": agg["prev_downloads"],
             "download_delta": agg["delta"],
             "download_pct_change": round(agg["pct_change"] * 100, 2),
+            "app_description": app_info["description"],
         }
         rows.append(row)
         print(f"  #{rank}: {app_info['name']} — {agg['pct_change']*100:.1f}% increase ({agg['downloads']:,} downloads)")
@@ -309,15 +357,35 @@ def fetch_top_advertisers():
     now = datetime.utcnow()
     rows = []
     for rank, app in enumerate(apps[:15], 1):
+        # The advertiser endpoint returns app_id but it may be a unified ID or platform ID
+        # We need to look up the app to get the description
+        app_id = str(app.get("app_id", ""))
+        app_name = app.get("name", app.get("humanized_name", "Unknown"))
+        publisher = app.get("publisher_name", "Unknown")
+        icon_url = app.get("icon_url", "")
+
+        # Look up description via the unified endpoint
+        app_info = lookup_app(app_id)
+        description = app_info.get("description", "")
+
+        # Use the advertiser endpoint's name/publisher/icon if lookup returns Unknown
+        if app_info["name"] == "Unknown":
+            app_info["name"] = app_name
+        if app_info["publisher"] == "Unknown":
+            app_info["publisher"] = publisher
+        if not app_info["icon_url"]:
+            app_info["icon_url"] = icon_url
+
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
             "period_start": period_start,
             "rank": rank,
-            "app_id": str(app.get("app_id", "")),
-            "app_name": app.get("name", app.get("humanized_name", "Unknown")),
-            "publisher": app.get("publisher_name", "Unknown"),
-            "icon_url": app.get("icon_url", ""),
+            "app_id": app_id,
+            "app_name": app_info["name"],
+            "publisher": app_info["publisher"],
+            "icon_url": app_info["icon_url"],
             "sov": app.get("sov", 0),
+            "app_description": description,
         }
         rows.append(row)
         print(f"  #{rank}: {row['app_name']} ({row['publisher']}) — SoV: {row['sov']:.3f}")
@@ -372,6 +440,7 @@ def fetch_top_download_delta():
             "previous_downloads": agg["prev_downloads"],
             "download_delta": agg["delta"],
             "download_pct_change": round(agg["pct_change"] * 100, 2),
+            "app_description": app_info["description"],
         }
         rows.append(row)
         print(f"  #{rank}: {app_info['name']} — delta: {agg['delta']:+,} ({agg['downloads']:,} downloads)")
