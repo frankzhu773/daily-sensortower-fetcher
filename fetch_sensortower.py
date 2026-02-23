@@ -188,25 +188,36 @@ def ensure_table(table_name, sample_row):
 
 
 def upsert_rows(table_name, rows):
-    """Insert or upsert rows into Supabase table."""
+    """Delete all existing data from the table, then insert new rows."""
     if not rows:
         print(f"  No rows to insert into {table_name}")
         return
 
     url = f"{SUPABASE_URL}/rest/v1/{table_name}"
-    headers = {**HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal"}
 
+    # Step 1: Delete all existing rows from the table
+    # Use a filter that matches all rows (id > 0 matches everything with a positive id)
+    delete_url = f"{url}?id=gt.0"
+    delete_headers = {**HEADERS, "Prefer": "return=minimal"}
+    del_resp = requests.delete(delete_url, headers=delete_headers)
+    if del_resp.status_code in (200, 204):
+        print(f"  Cleared all existing data from {table_name}")
+    else:
+        print(f"  Warning: Could not clear {table_name} (status {del_resp.status_code}): {del_resp.text[:200]}")
+
+    # Step 2: Insert new rows
+    insert_headers = {**HEADERS, "Prefer": "return=minimal"}
     batch_size = 50
     total_inserted = 0
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
-        resp = requests.post(url, headers=headers, json=batch)
+        resp = requests.post(url, headers=insert_headers, json=batch)
         if resp.status_code in (200, 201, 204):
             total_inserted += len(batch)
         else:
             print(f"  Insert error {resp.status_code}: {resp.text[:300]}")
             for row in batch:
-                resp2 = requests.post(url, headers=headers, json=row)
+                resp2 = requests.post(url, headers=insert_headers, json=row)
                 if resp2.status_code in (200, 201, 204):
                     total_inserted += 1
                 else:
