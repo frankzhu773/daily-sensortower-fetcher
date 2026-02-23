@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 Sensor Tower Data Fetcher
-Fetches top apps by downloads, download % increase, and top advertisers
-from Sensor Tower API and stores them in Supabase.
+Fetches top apps by downloads (7-day), download % increase (7-day),
+and top advertisers from Sensor Tower API and stores them in Supabase.
+
+Note: Sensor Tower data has a ~2-day delay, so we use (today - 2 days)
+as the latest available date, and fetch the 7-day window ending on that date.
 """
 
 import os
@@ -25,6 +28,14 @@ HEADERS = {
     "Content-Type": "application/json",
     "Prefer": "return=minimal",
 }
+
+DATA_DELAY_DAYS = 2  # Sensor Tower data is typically 2 days behind
+
+
+def get_latest_available_date():
+    """Get the latest date with available data (today - 2 days delay)."""
+    return datetime.utcnow() - timedelta(days=DATA_DELAY_DAYS)
+
 
 # ─── Helper: Sensor Tower API call with retry ────────────────────────────────
 def st_get(path, params):
@@ -156,23 +167,20 @@ def upsert_rows(table_name, rows):
     print(f"  Inserted {total_inserted}/{len(rows)} rows into {table_name}")
 
 
-# ─── Fetch 1: Top 15 Apps by Downloads (last 30 days) ───────────────────────
+# ─── Fetch 1: Top 15 Apps by Downloads (last 7 days) ─────────────────────────
 def fetch_top_downloads():
-    """Fetch top 15 apps by absolute downloads in the last month."""
-    print("\n=== Fetching Top 15 Apps by Downloads ===")
+    """Fetch top 15 apps by absolute downloads in the last 7 days."""
+    print("\n=== Fetching Top 15 Apps by Downloads (7-day) ===")
 
-    now = datetime.utcnow()
-    if now.day <= 5:
-        first_of_month = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
-    else:
-        first_of_month = now.replace(day=1)
-
-    date_str = first_of_month.strftime("%Y-%m-%d")
-    print(f"  Date: {date_str}")
+    latest_date = get_latest_available_date()
+    # For weekly data, use the date that represents the end of the 7-day window
+    date_str = latest_date.strftime("%Y-%m-%d")
+    period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
+    print(f"  Period: {period_start} to {date_str} (7 days)")
 
     data = st_get("/v1/unified/sales_report_estimates_comparison_attributes", {
         "comparison_attribute": "absolute",
-        "time_range": "month",
+        "time_range": "week",
         "measure": "units",
         "category": "0",
         "date": date_str,
@@ -187,6 +195,7 @@ def fetch_top_downloads():
 
     print(f"  Got {len(data)} apps")
 
+    now = datetime.utcnow()
     rows = []
     for rank, item in enumerate(data[:15], 1):
         unified_id = item.get("app_id", "")
@@ -199,7 +208,7 @@ def fetch_top_downloads():
 
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
-            "period_start": date_str,
+            "period_start": period_start,
             "rank": rank,
             "app_id": str(unified_id),
             "app_name": app_info["name"],
@@ -216,23 +225,19 @@ def fetch_top_downloads():
     return rows
 
 
-# ─── Fetch 2: Top 15 Apps by Download % Increase ────────────────────────────
+# ─── Fetch 2: Top 15 Apps by Download % Increase (last 7 days) ───────────────
 def fetch_top_download_growth():
-    """Fetch top 15 apps by download percentage increase in the last month."""
-    print("\n=== Fetching Top 15 Apps by Download % Increase ===")
+    """Fetch top 15 apps by download percentage increase in the last 7 days."""
+    print("\n=== Fetching Top 15 Apps by Download % Increase (7-day) ===")
 
-    now = datetime.utcnow()
-    if now.day <= 5:
-        first_of_month = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
-    else:
-        first_of_month = now.replace(day=1)
-
-    date_str = first_of_month.strftime("%Y-%m-%d")
-    print(f"  Date: {date_str}")
+    latest_date = get_latest_available_date()
+    date_str = latest_date.strftime("%Y-%m-%d")
+    period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
+    print(f"  Period: {period_start} to {date_str} (7 days)")
 
     data = st_get("/v1/unified/sales_report_estimates_comparison_attributes", {
         "comparison_attribute": "transformed_delta",
-        "time_range": "month",
+        "time_range": "week",
         "measure": "units",
         "category": "0",
         "date": date_str,
@@ -247,6 +252,7 @@ def fetch_top_download_growth():
 
     print(f"  Got {len(data)} apps")
 
+    now = datetime.utcnow()
     rows = []
     for rank, item in enumerate(data[:15], 1):
         unified_id = item.get("app_id", "")
@@ -256,7 +262,7 @@ def fetch_top_download_growth():
 
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
-            "period_start": date_str,
+            "period_start": period_start,
             "rank": rank,
             "app_id": str(unified_id),
             "app_name": app_info["name"],
@@ -275,22 +281,18 @@ def fetch_top_download_growth():
 
 # ─── Fetch 3: Top 15 Advertisers by Spend ───────────────────────────────────
 def fetch_top_advertisers():
-    """Fetch top 15 advertisers by ad spend (Share of Voice) in the last month."""
-    print("\n=== Fetching Top 15 Advertisers ===")
+    """Fetch top 15 advertisers by ad spend (Share of Voice) in the last 7 days."""
+    print("\n=== Fetching Top 15 Advertisers (7-day) ===")
 
-    now = datetime.utcnow()
-    if now.day <= 5:
-        first_of_month = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
-    else:
-        first_of_month = now.replace(day=1)
-
-    date_str = first_of_month.strftime("%Y-%m-%d")
-    print(f"  Date: {date_str}")
+    latest_date = get_latest_available_date()
+    date_str = latest_date.strftime("%Y-%m-%d")
+    period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
+    print(f"  Period: {period_start} to {date_str} (7 days)")
 
     data = st_get("/v1/unified/ad_intel/top_apps", {
         "role": "advertisers",
         "date": date_str,
-        "period": "month",
+        "period": "week",
         "category": "0",
         "country": "US",
         "network": "All Networks",
@@ -304,11 +306,12 @@ def fetch_top_advertisers():
     apps = data.get("apps", [])
     print(f"  Got {len(apps)} advertisers")
 
+    now = datetime.utcnow()
     rows = []
     for rank, app in enumerate(apps[:15], 1):
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
-            "period_start": date_str,
+            "period_start": period_start,
             "rank": rank,
             "app_id": str(app.get("app_id", "")),
             "app_name": app.get("name", app.get("humanized_name", "Unknown")),
@@ -325,8 +328,12 @@ def fetch_top_advertisers():
 # ─── Main ────────────────────────────────────────────────────────────────────
 def main():
     print("=" * 60)
-    print("Sensor Tower Data Fetcher")
+    print("Sensor Tower Data Fetcher (7-day window)")
     print(f"Run time: {datetime.utcnow().isoformat()}")
+    print(f"Data delay: {DATA_DELAY_DAYS} days")
+    latest = get_latest_available_date()
+    print(f"Latest available date: {latest.strftime('%Y-%m-%d')}")
+    print(f"7-day window: {(latest - timedelta(days=6)).strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d')}")
     print("=" * 60)
 
     if not ST_API_KEY:
@@ -340,26 +347,26 @@ def main():
         if not ensure_table(table, {}):
             print(f"WARNING: Table '{table}' may not exist. Will attempt inserts anyway.")
 
-    # 1. Top downloads
+    # 1. Top downloads (7-day)
     download_rows = fetch_top_downloads()
     if download_rows:
         upsert_rows("download_rank_30d", download_rows)
 
-    # 2. Top download % increase
+    # 2. Top download % increase (7-day)
     growth_rows = fetch_top_download_growth()
     if growth_rows:
         upsert_rows("download_percent_rank_30d", growth_rows)
 
-    # 3. Top advertisers
+    # 3. Top advertisers (7-day)
     advertiser_rows = fetch_top_advertisers()
     if advertiser_rows:
         upsert_rows("advertiser_rank_30d", advertiser_rows)
 
     print("\n" + "=" * 60)
     print("SUMMARY")
-    print(f"  Downloads ranking: {len(download_rows)} rows")
-    print(f"  Download growth ranking: {len(growth_rows)} rows")
-    print(f"  Advertiser ranking: {len(advertiser_rows)} rows")
+    print(f"  Downloads ranking (7-day): {len(download_rows)} rows")
+    print(f"  Download growth ranking (7-day): {len(growth_rows)} rows")
+    print(f"  Advertiser ranking (7-day): {len(advertiser_rows)} rows")
     print("=" * 60)
 
 
