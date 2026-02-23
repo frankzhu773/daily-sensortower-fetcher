@@ -86,10 +86,10 @@ def lookup_app(app_id):
     }
 
     # Step 2: Get description from platform-specific endpoint
-    # Prefer iOS sub_app for richer descriptions, fall back to Android
+    # Only use the FIRST iOS or Android sub_app (avoid iterating 100+ regional variants)
     sub_apps = data.get("sub_apps", [])
     if sub_apps:
-        # Try iOS first, then Android
+        # Try iOS first (richer descriptions with subtitle), then Android
         ios_sub = next((sa for sa in sub_apps if sa.get("os") == "ios"), None)
         android_sub = next((sa for sa in sub_apps if sa.get("os") == "android"), None)
         target_sub = ios_sub or android_sub
@@ -103,16 +103,18 @@ def lookup_app(app_id):
                 if platform_data and isinstance(platform_data, dict):
                     desc_obj = platform_data.get("description", {})
                     if isinstance(desc_obj, dict):
-                        # Priority: subtitle > app_summary > full_description (truncated)
-                        subtitle = (desc_obj.get("subtitle") or "").strip()
+                        # Priority: app_summary > subtitle > short_description > full_description
                         app_summary = (desc_obj.get("app_summary") or "").strip()
+                        subtitle = (desc_obj.get("subtitle") or "").strip()
+                        short_desc = (desc_obj.get("short_description") or "").strip()
                         full_desc = (desc_obj.get("full_description") or "").strip()
 
-                        if subtitle:
-                            result["description"] = subtitle
-                        elif app_summary:
-                            # app_summary can be long; take first sentence or truncate
+                        if app_summary:
                             result["description"] = app_summary[:500]
+                        elif subtitle:
+                            result["description"] = subtitle
+                        elif short_desc:
+                            result["description"] = short_desc[:500]
                         elif full_desc:
                             # Strip HTML tags and truncate
                             import re
