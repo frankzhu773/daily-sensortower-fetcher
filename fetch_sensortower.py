@@ -397,24 +397,24 @@ def main():
         print("ERROR: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set")
         sys.exit(1)
 
-    for table in ["download_rank_30d", "download_percent_rank_30d", "advertiser_rank_30d", "download_delta_rank_7d"]:
+    for table in ["download_rank_7d", "download_percent_rank_7d", "advertiser_rank_7d", "download_delta_rank_7d"]:
         if not ensure_table(table, {}):
             print(f"WARNING: Table '{table}' may not exist. Will attempt inserts anyway.")
 
     # 1. Top downloads (7-day)
     download_rows = fetch_top_downloads()
     if download_rows:
-        upsert_rows("download_rank_30d", download_rows)
+        upsert_rows("download_rank_7d", download_rows)
 
     # 2. Top download % increase (7-day)
     growth_rows = fetch_top_download_growth()
     if growth_rows:
-        upsert_rows("download_percent_rank_30d", growth_rows)
+        upsert_rows("download_percent_rank_7d", growth_rows)
 
     # 3. Top advertisers (7-day)
     advertiser_rows = fetch_top_advertisers()
     if advertiser_rows:
-        upsert_rows("advertiser_rank_30d", advertiser_rows)
+        upsert_rows("advertiser_rank_7d", advertiser_rows)
 
     # 4. Top download absolute change (7-day)
     delta_rows = fetch_top_download_delta()
