@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 ST_API_KEY = os.environ.get("SENSORTOWER_API_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 ST_BASE = "https://api.sensortower.com"
 
@@ -30,6 +31,44 @@ HEADERS = {
 }
 
 DATA_DELAY_DAYS = 2  # Sensor Tower data is typically 2 days behind
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+
+def summarize_description(app_name, raw_description):
+    """Use Gemini to summarize a raw app description into 1-3 concise sentences."""
+    if not raw_description or not GEMINI_API_KEY:
+        return raw_description
+
+    try:
+        prompt = (
+            f"Summarize this app description into 1-3 clear sentences about what the app does. "
+            f"Remove ranking data, pricing, update dates, and chart positions. "
+            f"Focus only on the app's purpose and user value.\n\n"
+            f"App: {app_name}\nDescription: {raw_description}"
+        )
+        resp = requests.post(
+            f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 150, "temperature": 0.3},
+            },
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if "candidates" in data:
+                summary = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                print(f"    Gemini summary: {summary[:80]}...")
+                return summary
+        else:
+            print(f"    Gemini error {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"    Gemini exception: {e}")
+
+    # Fallback: return raw description truncated
+    return raw_description[:500]
 
 
 def get_latest_available_date():
@@ -124,8 +163,10 @@ def lookup_app(app_id):
                     elif isinstance(desc_obj, str):
                         result["description"] = desc_obj[:500]
 
+    # Step 3: Summarize description using Gemini
     if result["description"]:
-        print(f"    Description: {result['description'][:80]}...")
+        print(f"    Raw description: {result['description'][:80]}...")
+        result["description"] = summarize_description(result["name"], result["description"])
 
     return result
 
