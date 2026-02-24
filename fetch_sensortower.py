@@ -32,43 +32,80 @@ HEADERS = {
 
 DATA_DELAY_DAYS = 2  # Sensor Tower data is typically 2 days behind
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 
 def summarize_description(app_name, raw_description):
-    """Use Gemini to summarize a raw app description into 1-3 concise sentences."""
-    if not raw_description or not GEMINI_API_KEY:
-        return raw_description
+    """Use Gemini 2.5 Flash with Google Search grounding to summarize an app description into 1-3 concise sentences."""
+    if not GEMINI_API_KEY:
+        return raw_description or ""
 
     try:
-        prompt = (
-            f"Summarize this app description into 1-3 clear sentences about what the app does. "
-            f"Remove ranking data, pricing, update dates, and chart positions. "
-            f"Focus only on the app's purpose and user value.\n\n"
-            f"App: {app_name}\nDescription: {raw_description}"
-        )
+        # If raw_description is empty or only contains ranking/metadata,
+        # ask Gemini to search for the app description
+        if not raw_description or len(raw_description.strip()) < 30:
+            prompt = (
+                f"What does the mobile app '{app_name}' do? "
+                f"Summarize in 1-3 clear sentences about its purpose and user value. "
+                f"Do not include ranking data, pricing, update dates, or chart positions."
+            )
+        else:
+            prompt = (
+                f"Summarize this app description into 1-3 clear sentences about what the app does. "
+                f"If the description lacks useful info, search for what '{app_name}' app does. "
+                f"Remove ranking data, pricing, update dates, and chart positions. "
+                f"Focus only on the app's purpose and user value.\n\n"
+                f"App: {app_name}\nDescription: {raw_description}"
+            )
         resp = requests.post(
             f"{GEMINI_URL}?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 150, "temperature": 0.3},
+                "tools": [{"google_search": {}}],
+                "generationConfig": {"maxOutputTokens": 250, "temperature": 0.3},
             },
-            timeout=20,
+            timeout=30,
         )
         if resp.status_code == 200:
             data = resp.json()
             if "candidates" in data:
-                summary = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                print(f"    Gemini summary: {summary[:80]}...")
+                # Extract text from all parts (Gemini may return multiple parts)
+                parts = data["candidates"][0]["content"]["parts"]
+                text_parts = [p["text"] for p in parts if "text" in p]
+                summary = " ".join(text_parts).strip()
+                grounded = bool(data["candidates"][0].get("groundingMetadata", {}).get("webSearchQueries"))
+                print(f"    Gemini summary{' (grounded)' if grounded else ''}: {summary[:80]}...")
                 return summary
+        elif resp.status_code == 429:
+            print(f"    Gemini rate limited, waiting 5s...")
+            time.sleep(5)
+            # Retry once
+            resp2 = requests.post(
+                f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "tools": [{"google_search": {}}],
+                    "generationConfig": {"maxOutputTokens": 250, "temperature": 0.3},
+                },
+                timeout=30,
+            )
+            if resp2.status_code == 200:
+                data = resp2.json()
+                if "candidates" in data:
+                    parts = data["candidates"][0]["content"]["parts"]
+                    text_parts = [p["text"] for p in parts if "text" in p]
+                    summary = " ".join(text_parts).strip()
+                    print(f"    Gemini summary (retry): {summary[:80]}...")
+                    return summary
         else:
             print(f"    Gemini error {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         print(f"    Gemini exception: {e}")
 
     # Fallback: return raw description truncated
-    return raw_description[:500]
+    return (raw_description or "")[:500]
 
 
 def get_latest_available_date():
