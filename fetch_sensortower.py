@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import time
+import re
 import requests
 from datetime import datetime, timedelta
 
@@ -35,77 +36,136 @@ DATA_DELAY_DAYS = 2  # Sensor Tower data is typically 2 days behind
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 
-def summarize_description(app_name, raw_description):
-    """Use Gemini 2.5 Flash with Google Search grounding to summarize an app description into 1-3 concise sentences."""
+def call_gemini(prompt, system_instruction, max_tokens=2000, use_search=False, retries=3):
+    """Call Gemini API with retry logic and exponential backoff."""
     if not GEMINI_API_KEY:
-        return raw_description or ""
+        return None
 
-    try:
-        # If raw_description is empty or only contains ranking/metadata,
-        # ask Gemini to search for the app description
-        if not raw_description or len(raw_description.strip()) < 30:
-            prompt = (
-                f"What does the mobile app '{app_name}' do? "
-                f"Summarize in 1-3 clear sentences about its purpose and user value. "
-                f"Do not include ranking data, pricing, update dates, or chart positions."
-            )
-        else:
-            prompt = (
-                f"Summarize this app description into 1-3 clear sentences about what the app does. "
-                f"If the description lacks useful info, search for what '{app_name}' app does. "
-                f"Remove ranking data, pricing, update dates, and chart positions. "
-                f"Focus only on the app's purpose and user value.\n\n"
-                f"App: {app_name}\nDescription: {raw_description}"
-            )
-        resp = requests.post(
-            f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "tools": [{"google_search": {}}],
-                "generationConfig": {"maxOutputTokens": 250, "temperature": 0.3},
-            },
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if "candidates" in data:
-                # Extract text from all parts (Gemini may return multiple parts)
-                parts = data["candidates"][0]["content"]["parts"]
-                text_parts = [p["text"] for p in parts if "text" in p]
-                summary = " ".join(text_parts).strip()
-                grounded = bool(data["candidates"][0].get("groundingMetadata", {}).get("webSearchQueries"))
-                print(f"    Gemini summary{' (grounded)' if grounded else ''}: {summary[:80]}...")
-                return summary
-        elif resp.status_code == 429:
-            print(f"    Gemini rate limited, waiting 5s...")
-            time.sleep(5)
-            # Retry once
-            resp2 = requests.post(
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3},
+    }
+    if use_search:
+        body["tools"] = [{"google_search": {}}]
+
+    for attempt in range(retries):
+        try:
+            resp = requests.post(
                 f"{GEMINI_URL}?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "tools": [{"google_search": {}}],
-                    "generationConfig": {"maxOutputTokens": 250, "temperature": 0.3},
-                },
+                json=body,
                 timeout=30,
             )
-            if resp2.status_code == 200:
-                data = resp2.json()
+            if resp.status_code == 200:
+                data = resp.json()
                 if "candidates" in data:
                     parts = data["candidates"][0]["content"]["parts"]
                     text_parts = [p["text"] for p in parts if "text" in p]
-                    summary = " ".join(text_parts).strip()
-                    print(f"    Gemini summary (retry): {summary[:80]}...")
-                    return summary
-        else:
-            print(f"    Gemini error {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        print(f"    Gemini exception: {e}")
+                    return " ".join(text_parts).strip()
+            elif resp.status_code in (429, 500, 502, 503, 504):
+                wait = 3 * (2 ** attempt)
+                print(f"    Gemini {resp.status_code}, retrying in {wait}s (attempt {attempt+1}/{retries})...")
+                time.sleep(wait)
+            else:
+                print(f"    Gemini error {resp.status_code}: {resp.text[:200]}")
+                return None
+        except Exception as e:
+            print(f"    Gemini exception: {e}")
+            if attempt < retries - 1:
+                time.sleep(3)
+    return None
 
-    # Fallback: return raw description truncated
-    return (raw_description or "")[:500]
+
+def batch_summarize_descriptions(rows):
+    """Use Gemini to summarize all app descriptions in a single batch call.
+    
+    Produces exactly 2 sentences per app in English. Non-English descriptions
+    are translated. App names that are not in English are kept as-is.
+    """
+    if not rows or not GEMINI_API_KEY:
+        return rows
+
+    print(f"\n  Batch summarizing {len(rows)} app descriptions...")
+
+    entries_text = ""
+    for idx, row in enumerate(rows):
+        raw_desc = row.get("app_description", "") or ""
+        # Truncate raw description to 300 chars to keep prompt manageable
+        raw_desc = raw_desc[:300].strip()
+        entries_text += f"\n{idx + 1}. App: {row.get('app_name', 'Unknown')}\n   Description: {raw_desc if raw_desc else '(no description available)'}\n"
+
+    prompt = f"""For each app below, write EXACTLY 2 sentences describing what the app does.
+
+RULES:
+- Write EXACTLY 2 sentences per app. Not 1, not 3. TWO sentences.
+- Sentence 1: What the app is and its primary function.
+- Sentence 2: A key feature or what makes it useful to users.
+- ALL output MUST be in English. Translate any non-English descriptions to English.
+- App names that are not in English should be kept in their original language (do NOT translate app names).
+- Do NOT include: ranking data, pricing, update dates, chart positions, download counts.
+- Do NOT start with "This app..." — start directly with the app name or a description of its function.
+- If the description is empty or unhelpful, use your knowledge to describe the app.
+- Keep each summary under 200 characters total.
+
+Apps:
+{entries_text}
+
+Respond with ONLY a JSON array of objects, each with "index" (1-based) and "summary" (exactly 2 sentences in English).
+Example: [{{"index": 1, "summary": "TikTok is a short-form video platform where users create and share entertaining clips. It features AI-powered recommendations, filters, effects, and a vast music library."}}]
+No other text, no markdown code blocks."""
+
+    system = "You are a professional app reviewer. Write exactly TWO sentences per app in English — no more, no less. Be specific and factual. Translate all non-English content to English except app names. Return valid JSON only."
+
+    result = call_gemini(prompt, system, max_tokens=4000, use_search=True)
+
+    if not result:
+        print("    WARNING: Batch summarization failed, keeping raw descriptions")
+        return rows
+
+    # Parse JSON response
+    cleaned = result.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+        cleaned = cleaned.strip()
+
+    summaries = []
+    try:
+        summaries = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Try to find JSON array
+        match = re.search(r'\[\s*\{.*?\}\s*\]', result, re.DOTALL)
+        if match:
+            try:
+                summaries = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+
+    if not summaries:
+        # Regex fallback
+        for m in re.finditer(r'"index"\s*:\s*(\d+)\s*,\s*"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', result):
+            try:
+                summaries.append({"index": int(m.group(1)), "summary": m.group(2)})
+            except (ValueError, IndexError):
+                continue
+
+    if not summaries:
+        print("    WARNING: Failed to parse batch summarization response")
+        return rows
+
+    # Apply summaries to rows
+    updated = 0
+    for item in summaries:
+        idx = item.get("index", 0) - 1
+        summary = item.get("summary", "")
+        if 0 <= idx < len(rows) and summary:
+            rows[idx]["app_description"] = summary
+            updated += 1
+            print(f"    [{idx+1}] {rows[idx].get('app_name', '')[:30]}: {summary[:80]}...")
+
+    print(f"  Summarized {updated}/{len(rows)} app descriptions")
+    return rows
 
 
 def get_latest_available_date():
@@ -193,17 +253,11 @@ def lookup_app(app_id):
                             result["description"] = short_desc[:500]
                         elif full_desc:
                             # Strip HTML tags and truncate
-                            import re
                             clean = re.sub(r'<[^>]+>', ' ', full_desc)
                             clean = re.sub(r'\s+', ' ', clean).strip()
                             result["description"] = clean[:500]
                     elif isinstance(desc_obj, str):
                         result["description"] = desc_obj[:500]
-
-    # Step 3: Summarize description using Gemini
-    if result["description"]:
-        print(f"    Raw description: {result['description'][:80]}...")
-        result["description"] = summarize_description(result["name"], result["description"])
 
     return result
 
@@ -564,21 +618,25 @@ def main():
     # 1. Top downloads (7-day)
     download_rows = fetch_top_downloads()
     if download_rows:
+        download_rows = batch_summarize_descriptions(download_rows)
         upsert_rows("download_rank_7d", download_rows)
 
     # 2. Top download % increase (7-day)
     growth_rows = fetch_top_download_growth()
     if growth_rows:
+        growth_rows = batch_summarize_descriptions(growth_rows)
         upsert_rows("download_percent_rank_7d", growth_rows)
 
     # 3. Top advertisers (7-day)
     advertiser_rows = fetch_top_advertisers()
     if advertiser_rows:
+        advertiser_rows = batch_summarize_descriptions(advertiser_rows)
         upsert_rows("advertiser_rank_7d", advertiser_rows)
 
     # 4. Top download absolute change (7-day)
     delta_rows = fetch_top_download_delta()
     if delta_rows:
+        delta_rows = batch_summarize_descriptions(delta_rows)
         upsert_rows("download_delta_rank_7d", delta_rows)
 
     print("\n" + "=" * 60)
