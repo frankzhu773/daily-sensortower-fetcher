@@ -49,7 +49,9 @@ def fetch_top_products(token, count=15):
             name
             tagline
             description
+            slug
             url
+            website
             votesCount
             commentsCount
             createdAt
@@ -97,12 +99,19 @@ def fetch_top_products(token, count=15):
         topics = ", ".join(t["node"]["name"] for t in p["topics"]["edges"])
         thumb = p["thumbnail"]["url"] if p.get("thumbnail") else None
 
+        # Product Hunt detail page URL
+        slug = p.get("slug", "")
+        ph_url = f"https://www.producthunt.com/posts/{slug}" if slug else p["url"]
+        # External website URL
+        website_url = p.get("website") or p["url"]
+
         results.append({
             "rank": i,
             "name": p["name"],
             "tagline": p["tagline"],
             "description": p.get("description", ""),
-            "url": p["url"],
+            "url": ph_url,
+            "website_url": website_url,
             "thumbnail_url": thumb,
             "votes_count": p["votesCount"],
             "comments_count": p["commentsCount"],
