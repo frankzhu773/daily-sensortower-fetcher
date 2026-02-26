@@ -4,7 +4,7 @@ Sensor Tower Data Fetcher
 Fetches top apps by downloads (7-day), download % increase (7-day),
 and top advertisers from Sensor Tower API and stores them in Supabase.
 
-Note: Sensor Tower data has a ~2-day delay, so we use (today - 2 days)
+Note: Sensor Tower data has a ~3-day delay, so we use (today - 3 days)
 as the latest available date, and fetch the 7-day window ending on that date.
 """
 
@@ -31,7 +31,7 @@ HEADERS = {
     "Prefer": "return=minimal",
 }
 
-DATA_DELAY_DAYS = 2  # Sensor Tower data is typically 2 days behind
+DATA_DELAY_DAYS = 3  # Sensor Tower data is typically 3 days behind
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
@@ -169,7 +169,7 @@ No other text, no markdown code blocks."""
 
 
 def get_latest_available_date():
-    """Get the latest date with available data (today - 2 days delay)."""
+    """Get the latest date with available data (today - 3 days delay)."""
     return datetime.utcnow() - timedelta(days=DATA_DELAY_DAYS)
 
 
