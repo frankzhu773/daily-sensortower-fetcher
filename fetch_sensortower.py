@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 Sensor Tower Data Fetcher
-Fetches top apps by downloads (7-day), download % increase (7-day),
+Fetches top apps by downloads (7-day daily avg), download % increase (7-day),
 and top advertisers from Sensor Tower API and stores them in Supabase.
+
+All download counts are stored as daily averages (7-day total / 7).
+Percentage changes remain the same (WoW % is identical for totals vs averages).
 
 Note: Sensor Tower data has a ~3-day delay, so we use (today - 3 days)
 as the latest available date, and fetch the 7-day window ending on that date.
@@ -266,15 +269,21 @@ def aggregate_entities(item):
     """
     Aggregate download/revenue data across all entities (platforms) for a unified app.
     The API returns per-platform data in the 'entities' array.
-    We sum across all entities to get the true unified total.
+    We sum across all entities to get the true unified total, then convert
+    to daily averages by dividing by 7 (the 7-day window).
     """
+    DAYS = 7  # 7-day window
+
     entities = item.get("entities", [])
     if not entities:
         # No entities array — data is at the top level (non-unified response)
+        raw_downloads = item.get("units_absolute", item.get("absolute", 0)) or 0
+        raw_prev = item.get("comparison_units_value", 0) or 0
+        raw_delta = item.get("units_delta", item.get("delta", 0)) or 0
         return {
-            "downloads": item.get("units_absolute", item.get("absolute", 0)),
-            "prev_downloads": item.get("comparison_units_value", 0),
-            "delta": item.get("units_delta", item.get("delta", 0)),
+            "downloads": round(raw_downloads / DAYS),
+            "prev_downloads": round(raw_prev / DAYS),
+            "delta": round(raw_delta / DAYS),
             "pct_change": item.get("units_transformed_delta", item.get("transformed_delta", 0)),
         }
 
@@ -288,6 +297,7 @@ def aggregate_entities(item):
         total_delta += ent.get("units_delta", ent.get("delta", 0)) or 0
 
     # For pct_change, compute from totals rather than averaging
+    # (percentage change is the same whether using totals or averages)
     pct_change = 0
     if total_prev and total_prev > 0:
         pct_change = total_delta / total_prev
@@ -295,10 +305,11 @@ def aggregate_entities(item):
         # Use the first entity's transformed_delta as fallback
         pct_change = entities[0].get("units_transformed_delta", entities[0].get("transformed_delta", 0)) or 0
 
+    # Convert totals to daily averages
     return {
-        "downloads": total_downloads,
-        "prev_downloads": total_prev,
-        "delta": total_delta,
+        "downloads": round(total_downloads / DAYS),
+        "prev_downloads": round(total_prev / DAYS),
+        "delta": round(total_delta / DAYS),
         "pct_change": pct_change,
     }
 
@@ -360,7 +371,7 @@ def upsert_rows(table_name, rows):
 
 # ─── Fetch 1: Top 15 Apps by Downloads (last 7 days) ─────────────────────────
 def fetch_top_downloads():
-    """Fetch top 15 apps by absolute downloads in the last 7 days."""
+    """Fetch top 15 apps by absolute downloads in the last 7 days (stored as daily avg)."""
     print("\n=== Fetching Top 15 Apps by Downloads (7-day) ===")
 
     latest_date = get_latest_available_date()
@@ -412,14 +423,14 @@ def fetch_top_downloads():
             "app_description": app_info["description"],
         }
         rows.append(row)
-        print(f"  #{rank}: {app_info['name']} — {agg['downloads']:,} downloads (prev: {agg['prev_downloads']:,}, delta: {agg['delta']:,})")
+        print(f"  #{rank}: {app_info['name']} — {agg['downloads']:,} avg daily downloads (prev avg: {agg['prev_downloads']:,}, daily delta: {agg['delta']:,})")
 
     return rows
 
 
 # ─── Fetch 2: Top 15 Apps by Download % Increase (last 7 days) ───────────────
 def fetch_top_download_growth():
-    """Fetch top 15 apps by download percentage increase in the last 7 days."""
+    """Fetch top 15 apps by download percentage increase in the last 7 days (stored as daily avg)."""
     print("\n=== Fetching Top 15 Apps by Download % Increase (7-day) ===")
 
     latest_date = get_latest_available_date()
@@ -467,7 +478,7 @@ def fetch_top_download_growth():
             "app_description": app_info["description"],
         }
         rows.append(row)
-        print(f"  #{rank}: {app_info['name']} — {agg['pct_change']*100:.1f}% increase ({agg['downloads']:,} downloads)")
+        print(f"  #{rank}: {app_info['name']} — {agg['pct_change']*100:.1f}% increase ({agg['downloads']:,} avg daily downloads)")
 
     return rows
 
@@ -540,7 +551,7 @@ def fetch_top_advertisers():
 
 # ─── Fetch 4: Top 15 Apps by Absolute Download Change (last 7 days) ─────────
 def fetch_top_download_delta():
-    """Fetch top 15 apps by absolute download change (delta) in the last 7 days."""
+    """Fetch top 15 apps by absolute download change (delta) in the last 7 days (stored as daily avg delta)."""
     print("\n=== Fetching Top 15 Apps by Absolute Download Change (7-day) ===")
 
     latest_date = get_latest_available_date()
@@ -588,7 +599,7 @@ def fetch_top_download_delta():
             "app_description": app_info["description"],
         }
         rows.append(row)
-        print(f"  #{rank}: {app_info['name']} — delta: {agg['delta']:+,} ({agg['downloads']:,} downloads)")
+        print(f"  #{rank}: {app_info['name']} — daily avg delta: {agg['delta']:+,} ({agg['downloads']:,} avg daily downloads)")
 
     return rows
 
@@ -596,7 +607,7 @@ def fetch_top_download_delta():
 # ─── Main ────────────────────────────────────────────────────────────────────
 def main():
     print("=" * 60)
-    print("Sensor Tower Data Fetcher (7-day window)")
+    print("Sensor Tower Data Fetcher (7-day window, daily averages)")
     print(f"Run time: {datetime.utcnow().isoformat()}")
     print(f"Data delay: {DATA_DELAY_DAYS} days")
     latest = get_latest_available_date()
