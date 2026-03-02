@@ -415,7 +415,7 @@ def fetch_top_downloads():
         "date": period_start,
         "end_date": end_date_str,
         "device_type": "total",
-        "limit": 15,
+        "limit": 50,
         "regions": "WW",
     })
 
@@ -485,7 +485,7 @@ def fetch_top_download_growth():
         "date": period_start,
         "end_date": end_date_str,
         "device_type": "total",
-        "limit": 15,
+        "limit": 50,
         "regions": "WW",
     })
 
@@ -545,7 +545,7 @@ def fetch_top_advertisers():
         "category": "0",
         "country": "US",
         "network": "All Networks",
-        "limit": 25,
+        "limit": 50,
     })
 
     if not data:
@@ -620,7 +620,7 @@ def fetch_top_download_delta():
         "date": period_start,
         "end_date": end_date_str,
         "device_type": "total",
-        "limit": 15,
+        "limit": 50,
         "regions": "WW",
     })
 
