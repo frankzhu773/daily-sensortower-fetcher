@@ -9,11 +9,11 @@ Percentage changes remain the same (WoW % is identical for totals vs averages).
 
 Uses time_range=day with date+end_date for exact 7-day windows, avoiding
 the Monday-snapping behavior of time_range=week. For example, if run on
-Mar 2 with a 3-day data delay:
-  Current period:  Feb 21 – Feb 27 (latest_date - 6 to latest_date)
-  Previous period: Feb 14 – Feb 20 (auto-computed by the API)
+Mar 2 with a 2-day data delay:
+  Current period:  Feb 22 – Feb 28 (latest_date - 6 to latest_date)
+  Previous period: Feb 15 – Feb 21 (auto-computed by the API)
 
-Note: Sensor Tower data has a ~3-day delay, so we use (today - 3 days)
+Note: Sensor Tower data has a ~2-day delay, so we use (today - 2 days)
 as the latest available date, and fetch the 7-day window ending on that date.
 """
 
@@ -40,7 +40,7 @@ HEADERS = {
     "Prefer": "return=minimal",
 }
 
-DATA_DELAY_DAYS = 3  # Sensor Tower data is typically 3 days behind
+DATA_DELAY_DAYS = 2  # Sensor Tower data is typically 2 days behind
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
