@@ -223,11 +223,25 @@ def lookup_app(app_id):
         else:
             name = "Unknown"
 
+    # Build store URLs from sub_apps
+    ios_store_url = ""
+    android_store_url = ""
+    sub_apps = data.get("sub_apps", [])
+    for sa in sub_apps:
+        sa_os = sa.get("os", "")
+        sa_id = sa.get("id", "")
+        if sa_os == "ios" and sa_id and not ios_store_url:
+            ios_store_url = f"https://apps.apple.com/app/id{sa_id}"
+        elif sa_os == "android" and sa_id and not android_store_url:
+            android_store_url = f"https://play.google.com/store/apps/details?id={sa_id}"
+
     result = {
         "name": name,
         "icon_url": data.get("icon_url", ""),
         "publisher": data.get("unified_publisher_name", data.get("publisher_name", "Unknown")),
         "description": "",
+        "ios_store_url": ios_store_url,
+        "android_store_url": android_store_url,
     }
 
     # Step 2: Get description from platform-specific endpoint
@@ -438,6 +452,8 @@ def fetch_top_downloads():
             "download_delta": agg["delta"],
             "download_pct_change": round(agg["pct_change"] * 100, 2),
             "app_description": app_info["description"],
+            "ios_store_url": app_info.get("ios_store_url", ""),
+            "android_store_url": app_info.get("android_store_url", ""),
         }
         rows.append(row)
         print(f"  #{rank}: {app_info['name']} — {agg['downloads']:,} avg daily downloads (prev avg: {agg['prev_downloads']:,}, daily delta: {agg['delta']:,})")
@@ -503,6 +519,8 @@ def fetch_top_download_growth():
             "download_delta": agg["delta"],
             "download_pct_change": round(agg["pct_change"] * 100, 2),
             "app_description": app_info["description"],
+            "ios_store_url": app_info.get("ios_store_url", ""),
+            "android_store_url": app_info.get("android_store_url", ""),
         }
         rows.append(row)
         print(f"  #{rank}: {app_info['name']} — {agg['pct_change']*100:.1f}% increase ({agg['downloads']:,} avg daily downloads)")
@@ -569,6 +587,8 @@ def fetch_top_advertisers():
             "icon_url": app_info["icon_url"],
             "sov": app.get("sov", 0),
             "app_description": description,
+            "ios_store_url": app_info.get("ios_store_url", ""),
+            "android_store_url": app_info.get("android_store_url", ""),
         }
         rows.append(row)
         print(f"  #{rank}: {row['app_name']} ({row['publisher']}) — SoV: {row['sov']:.3f}")
@@ -634,6 +654,8 @@ def fetch_top_download_delta():
             "download_delta": agg["delta"],
             "download_pct_change": round(agg["pct_change"] * 100, 2),
             "app_description": app_info["description"],
+            "ios_store_url": app_info.get("ios_store_url", ""),
+            "android_store_url": app_info.get("android_store_url", ""),
         }
         rows.append(row)
         print(f"  #{rank}: {app_info['name']} — daily avg delta: {agg['delta']:+,} ({agg['downloads']:,} avg daily downloads)")
