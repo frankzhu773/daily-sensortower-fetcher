@@ -7,6 +7,12 @@ and top advertisers from Sensor Tower API and stores them in Supabase.
 All download counts are stored as daily averages (7-day total / 7).
 Percentage changes remain the same (WoW % is identical for totals vs averages).
 
+Uses time_range=day with date+end_date for exact 7-day windows, avoiding
+the Monday-snapping behavior of time_range=week. For example, if run on
+Mar 2 with a 3-day data delay:
+  Current period:  Feb 21 – Feb 27 (latest_date - 6 to latest_date)
+  Previous period: Feb 14 – Feb 20 (auto-computed by the API)
+
 Note: Sensor Tower data has a ~3-day delay, so we use (today - 3 days)
 as the latest available date, and fetch the 7-day window ending on that date.
 """
@@ -371,21 +377,29 @@ def upsert_rows(table_name, rows):
 
 # ─── Fetch 1: Top 15 Apps by Downloads (last 7 days) ─────────────────────────
 def fetch_top_downloads():
-    """Fetch top 15 apps by absolute downloads in the last 7 days (stored as daily avg)."""
+    """Fetch top 15 apps by absolute downloads in the last 7 days (stored as daily avg).
+    
+    Uses time_range=day with date+end_date for exact 7-day windows.
+    Current period: (latest_date - 6) to latest_date
+    Previous period (auto-computed by API): the 7 days before that
+    """
     print("\n=== Fetching Top 15 Apps by Downloads (7-day) ===")
 
     latest_date = get_latest_available_date()
-    # For weekly data, use the date that represents the end of the 7-day window
-    date_str = latest_date.strftime("%Y-%m-%d")
+    end_date_str = latest_date.strftime("%Y-%m-%d")
     period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
-    print(f"  Period: {period_start} to {date_str} (7 days)")
+    prev_end = (latest_date - timedelta(days=7)).strftime("%Y-%m-%d")
+    prev_start = (latest_date - timedelta(days=13)).strftime("%Y-%m-%d")
+    print(f"  Current period: {period_start} to {end_date_str} (7 days)")
+    print(f"  Previous period: {prev_start} to {prev_end} (7 days)")
 
     data = st_get("/v1/unified/sales_report_estimates_comparison_attributes", {
         "comparison_attribute": "absolute",
-        "time_range": "week",
+        "time_range": "day",
         "measure": "units",
         "category": "0",
-        "date": date_str,
+        "date": period_start,
+        "end_date": end_date_str,
         "device_type": "total",
         "limit": 15,
         "regions": "WW",
@@ -411,6 +425,9 @@ def fetch_top_downloads():
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
             "period_start": period_start,
+            "period_end": end_date_str,
+            "prev_period_start": prev_start,
+            "prev_period_end": prev_end,
             "rank": rank,
             "app_id": str(unified_id),
             "app_name": app_info["name"],
@@ -430,20 +447,27 @@ def fetch_top_downloads():
 
 # ─── Fetch 2: Top 15 Apps by Download % Increase (last 7 days) ───────────────
 def fetch_top_download_growth():
-    """Fetch top 15 apps by download percentage increase in the last 7 days (stored as daily avg)."""
+    """Fetch top 15 apps by download percentage increase in the last 7 days (stored as daily avg).
+    
+    Uses time_range=day with date+end_date for exact 7-day windows.
+    """
     print("\n=== Fetching Top 15 Apps by Download % Increase (7-day) ===")
 
     latest_date = get_latest_available_date()
-    date_str = latest_date.strftime("%Y-%m-%d")
+    end_date_str = latest_date.strftime("%Y-%m-%d")
     period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
-    print(f"  Period: {period_start} to {date_str} (7 days)")
+    prev_end = (latest_date - timedelta(days=7)).strftime("%Y-%m-%d")
+    prev_start = (latest_date - timedelta(days=13)).strftime("%Y-%m-%d")
+    print(f"  Current period: {period_start} to {end_date_str} (7 days)")
+    print(f"  Previous period: {prev_start} to {prev_end} (7 days)")
 
     data = st_get("/v1/unified/sales_report_estimates_comparison_attributes", {
         "comparison_attribute": "transformed_delta",
-        "time_range": "week",
+        "time_range": "day",
         "measure": "units",
         "category": "0",
-        "date": date_str,
+        "date": period_start,
+        "end_date": end_date_str,
         "device_type": "total",
         "limit": 15,
         "regions": "WW",
@@ -466,6 +490,9 @@ def fetch_top_download_growth():
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
             "period_start": period_start,
+            "period_end": end_date_str,
+            "prev_period_start": prev_start,
+            "prev_period_end": prev_end,
             "rank": rank,
             "app_id": str(unified_id),
             "app_name": app_info["name"],
@@ -551,20 +578,27 @@ def fetch_top_advertisers():
 
 # ─── Fetch 4: Top 15 Apps by Absolute Download Change (last 7 days) ─────────
 def fetch_top_download_delta():
-    """Fetch top 15 apps by absolute download change (delta) in the last 7 days (stored as daily avg delta)."""
+    """Fetch top 15 apps by absolute download change (delta) in the last 7 days (stored as daily avg delta).
+    
+    Uses time_range=day with date+end_date for exact 7-day windows.
+    """
     print("\n=== Fetching Top 15 Apps by Absolute Download Change (7-day) ===")
 
     latest_date = get_latest_available_date()
-    date_str = latest_date.strftime("%Y-%m-%d")
+    end_date_str = latest_date.strftime("%Y-%m-%d")
     period_start = (latest_date - timedelta(days=6)).strftime("%Y-%m-%d")
-    print(f"  Period: {period_start} to {date_str} (7 days)")
+    prev_end = (latest_date - timedelta(days=7)).strftime("%Y-%m-%d")
+    prev_start = (latest_date - timedelta(days=13)).strftime("%Y-%m-%d")
+    print(f"  Current period: {period_start} to {end_date_str} (7 days)")
+    print(f"  Previous period: {prev_start} to {prev_end} (7 days)")
 
     data = st_get("/v1/unified/sales_report_estimates_comparison_attributes", {
         "comparison_attribute": "delta",
-        "time_range": "week",
+        "time_range": "day",
         "measure": "units",
         "category": "0",
-        "date": date_str,
+        "date": period_start,
+        "end_date": end_date_str,
         "device_type": "total",
         "limit": 15,
         "regions": "WW",
@@ -587,6 +621,9 @@ def fetch_top_download_delta():
         row = {
             "fetch_date": now.strftime("%Y-%m-%d"),
             "period_start": period_start,
+            "period_end": end_date_str,
+            "prev_period_start": prev_start,
+            "prev_period_end": prev_end,
             "rank": rank,
             "app_id": str(unified_id),
             "app_name": app_info["name"],
@@ -612,7 +649,8 @@ def main():
     print(f"Data delay: {DATA_DELAY_DAYS} days")
     latest = get_latest_available_date()
     print(f"Latest available date: {latest.strftime('%Y-%m-%d')}")
-    print(f"7-day window: {(latest - timedelta(days=6)).strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d')}")
+    print(f"Current 7-day window: {(latest - timedelta(days=6)).strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d')}")
+    print(f"Previous 7-day window: {(latest - timedelta(days=13)).strftime('%Y-%m-%d')} to {(latest - timedelta(days=7)).strftime('%Y-%m-%d')}")
     print("=" * 60)
 
     if not ST_API_KEY:
