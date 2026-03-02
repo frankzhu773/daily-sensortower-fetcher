@@ -427,7 +427,7 @@ def fetch_top_downloads():
 
     now = datetime.utcnow()
     rows = []
-    for rank, item in enumerate(data[:15], 1):
+    for rank, item in enumerate(data[:50], 1):
         unified_id = item.get("app_id", "")
 
         # Look up app name with robust retry
@@ -497,7 +497,7 @@ def fetch_top_download_growth():
 
     now = datetime.utcnow()
     rows = []
-    for rank, item in enumerate(data[:15], 1):
+    for rank, item in enumerate(data[:50], 1):
         unified_id = item.get("app_id", "")
 
         app_info = lookup_app(unified_id)
@@ -557,7 +557,7 @@ def fetch_top_advertisers():
 
     now = datetime.utcnow()
     rows = []
-    for rank, app in enumerate(apps[:15], 1):
+    for rank, app in enumerate(apps[:50], 1):
         # The advertiser endpoint returns app_id but it may be a unified ID or platform ID
         # We need to look up the app to get the description
         app_id = str(app.get("app_id", ""))
@@ -632,7 +632,7 @@ def fetch_top_download_delta():
 
     now = datetime.utcnow()
     rows = []
-    for rank, item in enumerate(data[:15], 1):
+    for rank, item in enumerate(data[:50], 1):
         unified_id = item.get("app_id", "")
 
         app_info = lookup_app(unified_id)
