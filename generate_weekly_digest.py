@@ -117,7 +117,14 @@ def generate_digest_rss(digests, output_path="public/weekly-digest.xml"):
         else:
             SubElement(item, "pubDate").text = pub_date
 
-        SubElement(item, "description").text = content_html
+        # Prepend reference line to the website
+        reference_line = (
+            '<p style="margin-bottom:1.5em;">'
+            'For more details and real-time updates, visit '
+            '<a href="https://technews-hfqdven9.manus.space/">Tech News Daily</a>.'
+            '</p>'
+        )
+        SubElement(item, "description").text = reference_line + content_html
         SubElement(item, "category").text = "Tech News"
         SubElement(item, "category").text = "Weekly Digest"
 
