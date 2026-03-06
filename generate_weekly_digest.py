@@ -147,8 +147,8 @@ def build_prompt(data, week_start, week_end):
         "1. **Opening paragraph** — A brief 2-3 sentence overview of the week's biggest themes.",
         "2. **Top App Downloads** — Highlight the top apps by download volume and any notable changes.",
         "3. **Biggest Movers** — Apps with the largest download surges or declines. Call out interesting stories.",
-        "4. **News Highlights** — This is the main section. Categorize ALL the news articles below by PRODUCT AREA "
-        "(e.g., 'AI & Machine Learning', 'Cloud & Infrastructure', 'Social Media & Creator Economy', "
+        "4. **News Highlights** — This is the main section. Categorize ALL the news articles below by PRODUCT AREA by analysing the summary of the news"
+        "(e.g., 'AI Creative Tools', 'AI Productivity Tool', 'AI Health App', "
         "'E-Commerce & Retail', 'Fintech & Payments', 'Health & Biotech', 'Gaming & Entertainment', "
         "'Developer Tools', 'Enterprise & SaaS', 'Hardware & Devices', 'Startups & Funding', etc.). "
         "Use <h3> for each product area subsection. Pick the most relevant and interesting articles for each area. "
@@ -221,7 +221,7 @@ def generate_digest_via_gemini(prompt):
     """Call Gemini API to generate the digest HTML content."""
     print("  Calling Gemini API for digest generation...")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key={GEMINI_API_KEY}"
 
     payload = {
         "contents": [
